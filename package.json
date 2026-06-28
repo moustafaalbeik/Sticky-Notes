@@ -1,0 +1,45 @@
+{
+  "name": "sticky-notes",
+  "version": "1.0.0",
+  "description": "Real sticky notes for your desktop",
+  "main": "main.js",
+  "author": "Moustafa Albeik",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "afterPack": "./afterPack.js",
+    "appId": "com.moustafa.stickynotes",
+    "productName": "Sticky Notes",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "note.html",
+      "search.html",
+      "icon.png",
+      "package.json",
+      "afterPack.js"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "icon.png",
+      "target": [
+        "dmg",
+        "dir"
+      ],
+      "identity": null
+    },
+    "dmg": {
+      "title": "Sticky Notes",
+      "iconSize": 100
+    }
+  }
+}

@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Sticky Note</title>
+  <style>
+    :root {
+      --text: #000000;
+      --muted: rgba(0,0,0,0.45);
+      --border: rgba(0,0,0,0.4);
+      --button-bg: rgba(0,0,0,0.12);
+      --button-bg-hover: rgba(0,0,0,0.28);
+      --button-text: rgba(0,0,0,0.65);
+      --button-text-hover: white;
+      --placeholder: rgba(0,0,0,0.4);
+      --highlight-top: rgba(255,255,255,0.35);
+      --highlight-bottom: rgba(0,0,0,0.06);
+      --check-bg: rgba(255,255,255,0.5);
+      --check-done-bg: #000000;
+      --done-color: rgba(0,0,0,0.45);
+    }
+    body.dark {
+      --text: #ffffff;
+      --muted: rgba(255,255,255,0.6);
+      --border: rgba(255,255,255,0.5);
+      --button-bg: rgba(255,255,255,0.18);
+      --button-bg-hover: rgba(255,255,255,0.35);
+      --button-text: rgba(255,255,255,0.85);
+      --button-text-hover: #000000;
+      --placeholder: rgba(255,255,255,0.45);
+      --highlight-top: rgba(255,255,255,0.1);
+      --highlight-bottom: rgba(0,0,0,0.2);
+      --check-bg: rgba(0,0,0,0.3);
+      --check-done-bg: #ffffff;
+      --done-color: rgba(255,255,255,0.45);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Segoe UI', sans-serif;
+      user-select: none;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      background: #FFE56B;
+      transition: background 0.25s ease;
+      position: relative;
+    }
+    body::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse at top left, var(--highlight-top), transparent 60%),
+        radial-gradient(ellipse at bottom right, var(--highlight-bottom), transparent 70%);
+    }
+    .header {
+      height: 30px;
+      flex-shrink: 0;
+      -webkit-app-region: drag;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      z-index: 2;
+    }
+    body:hover .header,
+    body:focus-within .header {
+      opacity: 1;
+    }
+    .colors {
+      display: flex;
+      gap: 4px;
+      -webkit-app-region: no-drag;
+    }
+    .swatch-wrap {
+      position: relative;
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+    }
+    .swatch {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      transition: transform 0.15s ease;
+    }
+    .swatch:hover { transform: scale(1.25); }
+    .swatch-del {
+      display: none;
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 10px;
+      height: 10px;
+      background: rgba(200,30,30,0.9);
+      color: #fff;
+      border-radius: 50%;
+      font-size: 9px;
+      font-weight: bold;
+      line-height: 10px;
+      text-align: center;
+      cursor: pointer;
+      z-index: 10;
+    }
+    .swatch-wrap:hover .swatch-del { display: block; }
+    .swatch-add {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 1px dashed var(--border);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: bold;
+      color: var(--muted);
+      transition: transform 0.15s ease, color 0.15s ease;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .swatch-add:hover { transform: scale(1.25); color: var(--text); }
+    .buttons {
+      display: flex;
+      gap: 4px;
+      -webkit-app-region: no-drag;
+    }
+    button {
+      width: 20px;
+      height: 20px;
+      border: none;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--button-bg);
+      color: var(--button-text);
+      transition: background 0.15s ease, color 0.15s ease;
+      font-family: -apple-system, sans-serif;
+      font-weight: bold;
+      padding: 0;
+    }
+    button:hover {
+      background: var(--button-bg-hover);
+      color: var(--button-text-hover);
+    }
+    .pinned #pin {
+      background: var(--check-done-bg);
+      color: var(--button-text-hover);
+    }
+
+    #editor {
+      flex: 1;
+      width: 100%;
+      padding: 6px 16px 16px 16px;
+      outline: none;
+      overflow-y: auto;
+      color: var(--text);
+      caret-color: var(--text);
+      user-select: text;
+      z-index: 1;
+      position: relative;
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: -0.01em;
+    }
+    #editor * { color: inherit !important; }
+    #editor.is-empty::before {
+      content: attr(data-placeholder);
+      color: var(--placeholder);
+      pointer-events: none;
+      position: absolute;
+      padding-top: 0;
+    }
+    #editor img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 6px;
+      display: block;
+      margin: 6px 0;
+    }
+    .help-popover {
+      position: absolute;
+      top: 30px;
+      right: 8px;
+      background: var(--button-bg-hover);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      line-height: 1.45;
+      z-index: 6;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      user-select: none;
+      min-width: 170px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-4px);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+    .help-popover.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .help-popover .row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 0;
+    }
+    .help-popover .row .keys {
+      display: inline-flex;
+      gap: 3px;
+      flex-shrink: 0;
+    }
+    .help-popover kbd {
+      background: var(--button-bg);
+      color: var(--text);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 10px;
+      font-weight: 600;
+      border: 1px solid var(--border);
+      min-width: 14px;
+      text-align: center;
+    }
+    .help-popover .label {
+      opacity: 0.85;
+    }
+
+    body.drag-over::after {
+      content: 'Drop image here';
+      position: absolute;
+      inset: 8px;
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text);
+      font-size: 14px;
+      pointer-events: none;
+      z-index: 10;
+      background: var(--button-bg);
+    }
+    #editor h1 { font-size: 24px; font-weight: 700; margin: 8px 0 4px; line-height: 1.2; }
+    #editor h2 { font-size: 20px; font-weight: 700; margin: 7px 0 3px; line-height: 1.25; }
+    #editor h3 { font-size: 18px; font-weight: 600; margin: 6px 0 3px; line-height: 1.3; }
+    #editor h4 { font-size: 16px; font-weight: 600; margin: 5px 0 2px; line-height: 1.3; }
+    #editor h5 { font-size: 14px; font-weight: 600; margin: 4px 0 2px; line-height: 1.35; }
+    #editor h6 { font-size: 13px; font-weight: 600; margin: 4px 0 2px; line-height: 1.35; text-transform: uppercase; letter-spacing: 0.05em; }
+    #editor p, #editor div { font-size: 14px; margin: 3px 0; line-height: 1.5; }
+    #editor b, #editor strong { font-weight: 700; }
+    #editor i, #editor em { font-style: italic; }
+
+    #editor p.todo {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 4px 0;
+    }
+    #editor .check {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 3px;
+      margin-top: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+      background: var(--check-bg);
+      transition: background 0.15s ease, border-color 0.15s ease;
+      user-select: none;
+      position: relative;
+    }
+    #editor .check:hover { border-color: var(--text); }
+    #editor .todo.done .check {
+      background: var(--check-done-bg);
+      border-color: var(--check-done-bg);
+    }
+    #editor .todo.done .check::after {
+      content: '✓';
+      color: var(--button-text-hover);
+      font-size: 10px;
+      font-weight: bold;
+      position: absolute;
+      top: -2px;
+      left: 2px;
+    }
+    #editor .todo.done {
+      color: var(--done-color);
+      text-decoration: line-through;
+    }
+
+    #editor ul, #editor ol {
+      margin: 4px 0;
+      padding-left: 22px;
+    }
+    #editor li {
+      margin: 2px 0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <input type="color" id="colorPicker" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none;">
+  <div class="header">
+    <div class="colors" id="colors"></div>
+    <div class="buttons">
+      <button id="help" title="Shortcuts">?</button>
+      <button id="pin" title="Pin on top">📌</button>
+      <button id="new" title="New note">+</button>
+      <button id="close" title="Delete note">×</button>
+    </div>
+  </div>
+  <div id="popover" class="help-popover">
+    <div class="row"><span class="keys"><kbd>/h1</kbd>–<kbd>/h6</kbd><kbd>⇥</kbd></span><span class="label">Heading</span></div>
+    <div class="row"><span class="keys"><kbd>/p</kbd><kbd>⇥</kbd></span><span class="label">Paragraph</span></div>
+    <div class="row"><span class="keys"><kbd>/todo</kbd><kbd>⇥</kbd></span><span class="label">Checkbox</span></div>
+    <div class="row"><span class="keys"><kbd>/ul</kbd><kbd>⇥</kbd></span><span class="label">Bullet list</span></div>
+    <div class="row"><span class="keys"><kbd>/ol</kbd><kbd>⇥</kbd></span><span class="label">Numbered list</span></div>
+    <div class="row"><span class="keys"><kbd>⌘B</kbd></span><span class="label">Bold</span></div>
+    <div class="row"><span class="keys"><kbd>⌘I</kbd></span><span class="label">Italic</span></div>
+    <div class="row"><span class="keys"><kbd>⌘F</kbd></span><span class="label">Search</span></div>
+    <div class="row"><span class="keys"><kbd>⌘+</kbd><kbd>⌘−</kbd></span><span class="label">Zoom in / out</span></div>
+    <div class="row"><span class="keys"><kbd>⌘⇧M</kbd></span><span class="label">Hide menu bar icon</span></div>
+  </div>
+  <div
+    id="editor"
+    contenteditable="true"
+    spellcheck="true"
+    data-placeholder="Type /h1 then Tab for a heading"
+  ></div>
+
+  <script>
+    let palette = ['#FFE56B', '#FF9DC4', '#9DD4FF', '#A8E6A3', '#FFB570', '#D4A8FF', '#FFFFFF'];
+    const SHORTCUTS = {
+      '/h1': 'H1',
+      '/h2': 'H2',
+      '/h3': 'H3',
+      '/h4': 'H4',
+      '/h5': 'H5',
+      '/h6': 'H6',
+      '/p': 'P',
+      '/todo': 'TODO',
+      '/ul': 'UL',
+      '/ol': 'OL',
+    };
+
+    let noteId = null;
+    const editor = document.getElementById('editor');
+    const colorsEl = document.getElementById('colors');
+
+    try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (_) {}
+
+    function renderSwatches() {
+      colorsEl.innerHTML = '';
+      palette.forEach((c, i) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'swatch-wrap';
+
+        const sw = document.createElement('div');
+        sw.className = 'swatch';
+        sw.style.background = c;
+        sw.onclick = () => {
+          document.body.style.background = c;
+          window.api.update({ id: noteId, color: c });
+        };
+
+        const del = document.createElement('div');
+        del.className = 'swatch-del';
+        del.textContent = '×';
+        del.title = 'Remove color';
+        del.onclick = (e) => {
+          e.stopPropagation();
+          window.api.removeColor(i);
+        };
+
+        wrap.appendChild(sw);
+        wrap.appendChild(del);
+        colorsEl.appendChild(wrap);
+      });
+
+      const addBtn = document.createElement('div');
+      addBtn.className = 'swatch-add';
+      addBtn.textContent = '+';
+      addBtn.title = 'Add color';
+      addBtn.onclick = () => document.getElementById('colorPicker').click();
+      colorsEl.appendChild(addBtn);
+    }
+    renderSwatches();
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+      })[c]);
+    }
+
+    function updateEmptyState() {
+      const isEmpty = editor.innerText.trim() === '';
+      editor.classList.toggle('is-empty', isEmpty);
+    }
+
+    function getCurrentBlock() {
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return null;
+      let node = sel.anchorNode;
+      while (node && node !== editor) {
+        if (
+          node.nodeType === 1 &&
+          /^(P|H1|H2|H3|H4|H5|H6|DIV)$/.test(node.nodeName) &&
+          node.parentNode === editor
+        ) {
+          return node;
+        }
+        node = node.parentNode;
+      }
+      return null;
+    }
+
+    function tryTransform() {
+      const block = getCurrentBlock();
+      if (!block) return false;
+      const text = block.textContent;
+      for (const [prefix, type] of Object.entries(SHORTCUTS)) {
+        if (text === prefix || text.startsWith(prefix)) {
+          let rest = text.slice(prefix.length);
+          if (rest.startsWith(' ')) rest = rest.slice(1);
+
+          let newEl;
+          let cursorTarget;
+
+          if (type === 'TODO') {
+            newEl = document.createElement('p');
+            newEl.className = 'todo';
+            const check = document.createElement('span');
+            check.className = 'check';
+            check.setAttribute('contenteditable', 'false');
+            newEl.appendChild(check);
+            if (rest) {
+              newEl.appendChild(document.createTextNode(rest));
+            } else {
+              newEl.appendChild(document.createTextNode('\u200B'));
+            }
+            cursorTarget = newEl;
+          } else if (type === 'UL' || type === 'OL') {
+            newEl = document.createElement(type === 'UL' ? 'ul' : 'ol');
+            const li = document.createElement('li');
+            if (rest) {
+              li.textContent = rest;
+            } else {
+              li.appendChild(document.createElement('br'));
+            }
+            newEl.appendChild(li);
+            cursorTarget = li;
+          } else {
+            newEl = document.createElement(type);
+            if (rest) {
+              newEl.textContent = rest;
+            } else {
+              newEl.appendChild(document.createElement('br'));
+            }
+            cursorTarget = newEl;
+          }
+
+          block.replaceWith(newEl);
+
+          const range = document.createRange();
+          range.selectNodeContents(cursorTarget);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    let saveTimer;
+    function scheduleSave() {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        window.api.update({ id: noteId, text: editor.innerHTML });
+      }, 250);
+    }
+
+    function normalizeBlocks() {
+      const sel = window.getSelection();
+      let cursorNode = sel.rangeCount ? sel.anchorNode : null;
+      let cursorOffset = sel.rangeCount ? sel.anchorOffset : 0;
+      let changed = false;
+
+      for (const child of [...editor.childNodes]) {
+        if (
+          child.nodeType === 3 ||
+          (child.nodeType === 1 && child.nodeName === 'BR')
+        ) {
+          const p = document.createElement('p');
+          editor.insertBefore(p, child);
+          p.appendChild(child);
+          changed = true;
+        }
+      }
+
+      if (changed && cursorNode && cursorNode.isConnected) {
+        try {
+          const range = document.createRange();
+          const maxOffset =
+            cursorNode.nodeType === 3
+              ? cursorNode.textContent.length
+              : cursorNode.childNodes.length;
+          range.setStart(cursorNode, Math.min(cursorOffset, maxOffset));
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        } catch (_) {}
+      }
+    }
+
+    function placeCursorAtEnd() {
+      const blocks = editor.querySelectorAll('p, h1, h2, h3, h4, h5, h6, div');
+      const last = blocks[blocks.length - 1];
+      if (!last) return;
+      const range = document.createRange();
+      range.selectNodeContents(last);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    editor.addEventListener('input', () => {
+      normalizeBlocks();
+      updateEmptyState();
+      scheduleSave();
+    });
+
+    editor.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (tryTransform()) scheduleSave();
+        return;
+      }
+      const cmd = e.metaKey || e.ctrlKey;
+      if (cmd && (e.key === 'b' || e.key === 'B')) {
+        e.preventDefault();
+        document.execCommand('bold');
+        scheduleSave();
+        return;
+      }
+      if (cmd && (e.key === 'i' || e.key === 'I')) {
+        e.preventDefault();
+        document.execCommand('italic');
+        scheduleSave();
+        return;
+      }
+    });
+
+    editor.addEventListener('click', (e) => {
+      const target = e.target;
+      if (target && target.classList && target.classList.contains('check')) {
+        const todo = target.closest('.todo');
+        if (todo) {
+          todo.classList.toggle('done');
+          scheduleSave();
+        }
+      }
+    });
+
+    window.api.onInit(({ id, color, text, pinned, theme, palette: pal }) => {
+      noteId = id;
+      if (pal) {
+        palette = pal;
+        renderSwatches();
+      }
+      if (theme === 'dark') document.body.classList.add('dark');
+      document.body.style.background = color;
+      if (!text) {
+        editor.innerHTML = '<p><br></p>';
+      } else if (!text.includes('<')) {
+        editor.innerHTML = `<p>${escapeHtml(text).replace(/\n/g, '<br>')}</p>`;
+      } else {
+        editor.innerHTML = text;
+      }
+      normalizeBlocks();
+      if (pinned) document.body.classList.add('pinned');
+      updateEmptyState();
+      editor.focus();
+      placeCursorAtEnd();
+    });
+
+    window.api.onTheme(({ theme, palette: pal, color }) => {
+      palette = pal;
+      renderSwatches();
+      document.body.classList.toggle('dark', theme === 'dark');
+      document.body.style.background = color;
+    });
+
+    function insertImage(file) {
+      if (!file || !file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        const img = `<p><img src="${dataUrl}" alt=""/></p>`;
+        editor.focus();
+        document.execCommand('insertHTML', false, img);
+        scheduleSave();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    editor.addEventListener('copy', (e) => {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+      e.preventDefault();
+      const fragment = sel.getRangeAt(0).cloneContents();
+      const wrapper = document.createElement('div');
+      wrapper.appendChild(fragment);
+      wrapper.querySelectorAll('*').forEach((el) => {
+        if (el.style) {
+          el.style.removeProperty('background');
+          el.style.removeProperty('background-color');
+          el.style.removeProperty('color');
+        }
+      });
+      e.clipboardData.setData('text/html', wrapper.innerHTML);
+      e.clipboardData.setData('text/plain', sel.toString());
+    });
+
+    function sanitizePastedHtml(html) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      div.querySelectorAll(
+        'script, style, meta, link, input, button, iframe, object, embed, form, select, textarea'
+      ).forEach((el) => el.remove());
+      div.querySelectorAll('*').forEach((el) => {
+        if (el.style) {
+          el.style.removeProperty('background');
+          el.style.removeProperty('background-color');
+          el.style.removeProperty('color');
+          el.style.removeProperty('font-family');
+          el.style.removeProperty('font-size');
+        }
+        el.removeAttribute('class');
+        el.removeAttribute('id');
+        for (const attr of [...el.attributes]) {
+          if (attr.name.startsWith('on') || attr.name === 'contenteditable') {
+            el.removeAttribute(attr.name);
+          }
+        }
+      });
+      return div.innerHTML;
+    }
+
+    editor.addEventListener('paste', (e) => {
+      const items = e.clipboardData && e.clipboardData.items;
+      if (items) {
+        for (const item of items) {
+          if (item.kind === 'file' && item.type.startsWith('image/')) {
+            e.preventDefault();
+            insertImage(item.getAsFile());
+            return;
+          }
+        }
+      }
+      const html = e.clipboardData && e.clipboardData.getData('text/html');
+      if (html) {
+        e.preventDefault();
+        document.execCommand('insertHTML', false, sanitizePastedHtml(html));
+        scheduleSave();
+      }
+    });
+
+    document.body.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) {
+        e.preventDefault();
+        document.body.classList.add('drag-over');
+      }
+    });
+    document.body.addEventListener('dragleave', (e) => {
+      if (e.target === document.body) {
+        document.body.classList.remove('drag-over');
+      }
+    });
+    document.body.addEventListener('drop', (e) => {
+      document.body.classList.remove('drag-over');
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || files.length === 0) return;
+      e.preventDefault();
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          insertImage(file);
+        }
+      }
+    });
+
+    document.getElementById('colorPicker').addEventListener('change', (e) => {
+      window.api.addColor(e.target.value);
+    });
+
+    document.getElementById('new').onclick = () => window.api.newNote();
+
+    document.getElementById('close').onclick = () => {
+      if (editor.innerText.trim() === '' || confirm('Delete this note?')) {
+        window.api.deleteNote(noteId);
+      }
+    };
+
+    document.getElementById('pin').onclick = () => {
+      const pinned = document.body.classList.toggle('pinned');
+      window.api.pinNote(noteId, pinned);
+    };
+
+    const helpBtn = document.getElementById('help');
+    const popover = document.getElementById('popover');
+    helpBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      popover.classList.toggle('show');
+    });
+    document.addEventListener('click', (e) => {
+      if (!popover.contains(e.target) && e.target !== helpBtn) {
+        popover.classList.remove('show');
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') popover.classList.remove('show');
+    });
+  </script>
+</body>
+</html>

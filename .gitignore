@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.icns
+icon.iconset/
+.DS_Store
