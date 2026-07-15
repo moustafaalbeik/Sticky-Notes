@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('api', {
   onInit: (cb) => ipcRenderer.on('init', (_e, data) => cb(data)),
   onTheme: (cb) => ipcRenderer.on('theme', (_e, data) => cb(data)),
   onSaveRequest: (cb) => ipcRenderer.on('note:perform-save', cb),
+  onImportRequest: (cb) => ipcRenderer.on('note:perform-import', (_e, data) => cb(data)),
   addColor: (color) => ipcRenderer.send('palette:add', color),
   removeColor: (index) => ipcRenderer.send('palette:remove', index),
   resetColors: () => ipcRenderer.send('palette:reset'),

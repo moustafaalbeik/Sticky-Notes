@@ -338,7 +338,8 @@
     <div class="row"><span class="keys"><kbd>/ol</kbd><kbd>⇥</kbd></span><span class="label">Numbered list</span></div>
     <div class="row"><span class="keys"><kbd>⌘B</kbd></span><span class="label">Bold</span></div>
     <div class="row"><span class="keys"><kbd>⌘I</kbd></span><span class="label">Italic</span></div>
-    <div class="row"><span class="keys"><kbd>⌘S</kbd></span><span class="label">Save as HTML / TXT / MD</span></div>
+    <div class="row"><span class="keys"><kbd>⌘S</kbd></span><span class="label">Export note</span></div>
+    <div class="row"><span class="keys"><kbd>⌘O</kbd></span><span class="label">Import file</span></div>
     <div class="row"><span class="keys"><kbd>⌘F</kbd></span><span class="label">Search</span></div>
     <div class="row"><span class="keys"><kbd>⌘+</kbd><kbd>⌘−</kbd></span><span class="label">Zoom in / out</span></div>
     <div class="row"><span class="keys"><kbd>⌘⇧M</kbd></span><span class="label">Hide menu bar icon</span></div>
@@ -419,6 +420,10 @@
       editor.classList.toggle('is-empty', isEmpty);
     }
 
+    function isEffectivelyEmpty() {
+      return buildPlainText() === '' && !editor.querySelector('img');
+    }
+
     function buildPlainText() {
       return editor.innerText.replace(/\u200B/g, '').trimEnd();
     }
@@ -460,6 +465,54 @@
         text: buildPlainText(),
         markdown: buildMarkdown(),
       });
+    }
+
+    function setEditorHtml(html) {
+      editor.innerHTML = html && html.trim() ? html : '<p><br></p>';
+      normalizeBlocks();
+      updateEmptyState();
+      editor.focus();
+      placeCursorAtEnd();
+      window.api.update({ id: noteId, text: editor.innerHTML });
+    }
+
+    function sanitizeImportedHtml(html) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      div.querySelectorAll(
+        'script, style, meta, link, input, button, iframe, object, embed, form, select, textarea'
+      ).forEach((el) => el.remove());
+      div.querySelectorAll('*').forEach((el) => {
+        if (el.style) {
+          el.style.removeProperty('background');
+          el.style.removeProperty('background-color');
+          el.style.removeProperty('color');
+          el.style.removeProperty('font-family');
+          el.style.removeProperty('font-size');
+        }
+        if (el.classList.contains('todo')) {
+          el.className = el.classList.contains('done') ? 'todo done' : 'todo';
+        } else if (el.classList.contains('check')) {
+          el.className = 'check';
+          el.setAttribute('contenteditable', 'false');
+        } else {
+          el.removeAttribute('class');
+        }
+        el.removeAttribute('id');
+        for (const attr of [...el.attributes]) {
+          if (attr.name.startsWith('on')) {
+            el.removeAttribute(attr.name);
+          }
+        }
+      });
+      return div.innerHTML;
+    }
+
+    function importHtml(html) {
+      if (!isEffectivelyEmpty() && !confirm('Replace the current note with the imported file?')) {
+        return;
+      }
+      setEditorHtml(sanitizeImportedHtml(html));
     }
 
     function getCurrentBlock() {
@@ -616,10 +669,6 @@
         scheduleSave();
         return;
       }
-      if (cmd && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault();
-        openSaveDialog();
-      }
     });
 
     editor.addEventListener('click', (e) => {
@@ -664,6 +713,10 @@
 
     window.api.onSaveRequest(() => {
       openSaveDialog();
+    });
+
+    window.api.onImportRequest(({ html }) => {
+      importHtml(html);
     });
 
     function insertImage(file) {

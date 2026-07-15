@@ -153,6 +153,22 @@ function createNote(data = {}) {
   win.noteId = id;
   windows.set(id, win);
 
+  win.webContents.on('before-input-event', (event, input) => {
+    const cmd = input.meta || input.control;
+    if (!cmd || input.type !== 'keyDown') return;
+
+    const key = String(input.key || '').toLowerCase();
+    if (key === 's') {
+      event.preventDefault();
+      requestSaveForWindow(win);
+      return;
+    }
+    if (key === 'o') {
+      event.preventDefault();
+      requestImportForWindow(win);
+    }
+  });
+
   win.loadFile('note.html');
   win.webContents.on('did-finish-load', () => {
     win.webContents.send('init', {
@@ -222,6 +238,111 @@ ${body}
 `;
 }
 
+function getFocusedNoteWindow() {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && [...windows.values()].includes(focused)) return focused;
+  return [...windows.values()].find((win) => !win.isDestroyed()) || null;
+}
+
+function normalizeImportedHtml(content) {
+  const html = String(content || '').trim();
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  return bodyMatch ? bodyMatch[1].trim() : html;
+}
+
+function plainTextToHtml(content) {
+  return String(content || '')
+    .split(/\r?\n\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) =>
+      `<p>${paragraph
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/\r?\n/g, '<br>')}</p>`
+    )
+    .join('');
+}
+
+function markdownToHtml(content) {
+  const lines = String(content || '').split(/\r?\n/);
+  const blocks = [];
+  let listType = null;
+
+  const closeList = () => {
+    if (listType) {
+      blocks.push(`</${listType}>`);
+      listType = null;
+    }
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      closeList();
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      blocks.push(`<h${level}>${escapeInline(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    const todo = trimmed.match(/^-\s+\[([ xX])\]\s+(.*)$/);
+    if (todo) {
+      closeList();
+      const done = todo[1].toLowerCase() === 'x' ? ' done' : '';
+      blocks.push(`<p class="todo${done}"><span class="check" contenteditable="false"></span>${escapeInline(todo[2])}</p>`);
+      continue;
+    }
+
+    const ul = trimmed.match(/^[-*]\s+(.*)$/);
+    if (ul) {
+      if (listType !== 'ul') {
+        closeList();
+        listType = 'ul';
+        blocks.push('<ul>');
+      }
+      blocks.push(`<li>${escapeInline(ul[1])}</li>`);
+      continue;
+    }
+
+    const ol = trimmed.match(/^\d+\.\s+(.*)$/);
+    if (ol) {
+      if (listType !== 'ol') {
+        closeList();
+        listType = 'ol';
+        blocks.push('<ol>');
+      }
+      blocks.push(`<li>${escapeInline(ol[1])}</li>`);
+      continue;
+    }
+
+    closeList();
+    blocks.push(`<p>${escapeInline(trimmed)}</p>`);
+  }
+
+  closeList();
+  return blocks.join('');
+}
+
+function escapeInline(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function saveNoteToFile(win, note = {}) {
   if (!win || win.isDestroyed()) return { canceled: true };
   const html = String(note.html || '');
@@ -253,10 +374,61 @@ async function saveNoteToFile(win, note = {}) {
   return { canceled: false, filePath };
 }
 
+async function importNoteFromFile(win) {
+  const targetWin = win && !win.isDestroyed() ? win : getFocusedNoteWindow() || createNote();
+  const { canceled, filePaths } = await dialog.showOpenDialog(targetWin, {
+    title: 'Import Note',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Supported Files', extensions: ['html', 'htm', 'txt', 'md'] },
+      { name: 'HTML', extensions: ['html', 'htm'] },
+      { name: 'Plain Text', extensions: ['txt'] },
+      { name: 'Markdown', extensions: ['md'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (canceled || !filePaths.length) return { canceled: true };
+
+  const filePath = filePaths[0];
+  const ext = path.extname(filePath).toLowerCase();
+  const content = fs.readFileSync(filePath, 'utf8');
+  let html = plainTextToHtml(content);
+
+  if (ext === '.html' || ext === '.htm') {
+    html = normalizeImportedHtml(content);
+  } else if (ext === '.md') {
+    html = markdownToHtml(content);
+  }
+
+  const payload = { html, filePath };
+  if (targetWin.webContents.isLoading()) {
+    targetWin.webContents.once('did-finish-load', () => {
+      targetWin.webContents.send('note:perform-import', payload);
+    });
+  } else {
+    targetWin.webContents.send('note:perform-import', payload);
+  }
+  return { canceled: false, filePath };
+}
+
+function requestSaveForWindow(win) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send('note:perform-save');
+}
+
 function requestSaveForFocusedWindow() {
-  const focused = BrowserWindow.getFocusedWindow();
-  if (!focused || focused.isDestroyed()) return;
-  focused.webContents.send('note:perform-save');
+  requestSaveForWindow(getFocusedNoteWindow());
+}
+
+function requestImportForWindow(win) {
+  importNoteFromFile(win).catch((error) => {
+    console.error('Failed to import note', error);
+  });
+}
+
+function requestImportForFocusedWindow() {
+  requestImportForWindow(getFocusedNoteWindow());
 }
 
 function openSearch() {
@@ -321,7 +493,9 @@ function buildMenu() {
       label: 'File',
       submenu: [
         { label: 'New Note', accelerator: 'CmdOrCtrl+N', click: () => createNote() },
-        { label: 'Save As...', accelerator: 'CmdOrCtrl+S', click: requestSaveForFocusedWindow },
+        { label: 'Export Note...', accelerator: 'CmdOrCtrl+S', click: requestSaveForFocusedWindow },
+        { label: 'Import File...', accelerator: 'CmdOrCtrl+O', click: requestImportForFocusedWindow },
+        { type: 'separator' },
         {
           label: 'Close Note',
           accelerator: 'CmdOrCtrl+W',
