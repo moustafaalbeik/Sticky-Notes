@@ -338,6 +338,7 @@
     <div class="row"><span class="keys"><kbd>/ol</kbd><kbd>⇥</kbd></span><span class="label">Numbered list</span></div>
     <div class="row"><span class="keys"><kbd>⌘B</kbd></span><span class="label">Bold</span></div>
     <div class="row"><span class="keys"><kbd>⌘I</kbd></span><span class="label">Italic</span></div>
+    <div class="row"><span class="keys"><kbd>⌘S</kbd></span><span class="label">Save as HTML / TXT / MD</span></div>
     <div class="row"><span class="keys"><kbd>⌘F</kbd></span><span class="label">Search</span></div>
     <div class="row"><span class="keys"><kbd>⌘+</kbd><kbd>⌘−</kbd></span><span class="label">Zoom in / out</span></div>
     <div class="row"><span class="keys"><kbd>⌘⇧M</kbd></span><span class="label">Hide menu bar icon</span></div>
@@ -416,6 +417,49 @@
     function updateEmptyState() {
       const isEmpty = editor.innerText.trim() === '';
       editor.classList.toggle('is-empty', isEmpty);
+    }
+
+    function buildPlainText() {
+      return editor.innerText.replace(/\u200B/g, '').trimEnd();
+    }
+
+    function buildMarkdown() {
+      return [...editor.childNodes].map((node) => {
+        if (node.nodeType === Node.TEXT_NODE) return node.textContent || '';
+        if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+        const text = (node.innerText || node.textContent || '').replace(/\u200B/g, '').trim();
+        switch (node.nodeName) {
+          case 'H1': return `# ${text}`;
+          case 'H2': return `## ${text}`;
+          case 'H3': return `### ${text}`;
+          case 'H4': return `#### ${text}`;
+          case 'H5': return `##### ${text}`;
+          case 'H6': return `###### ${text}`;
+          case 'UL':
+            return [...node.querySelectorAll('li')].map((li) => `- ${li.innerText.trim()}`).join('\n');
+          case 'OL':
+            return [...node.querySelectorAll('li')].map((li, index) => `${index + 1}. ${li.innerText.trim()}`).join('\n');
+          case 'P':
+            if (node.classList.contains('todo')) {
+              return `- [${node.classList.contains('done') ? 'x' : ' '}] ${text}`;
+            }
+            return text;
+          case 'DIV':
+            return text;
+          default:
+            return text;
+        }
+      }).filter(Boolean).join('\n\n').trim();
+    }
+
+    async function openSaveDialog() {
+      window.api.update({ id: noteId, text: editor.innerHTML });
+      return window.api.saveNote({
+        html: editor.innerHTML,
+        text: buildPlainText(),
+        markdown: buildMarkdown(),
+      });
     }
 
     function getCurrentBlock() {
@@ -572,6 +616,10 @@
         scheduleSave();
         return;
       }
+      if (cmd && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        openSaveDialog();
+      }
     });
 
     editor.addEventListener('click', (e) => {
@@ -612,6 +660,10 @@
       renderSwatches();
       document.body.classList.toggle('dark', theme === 'dark');
       document.body.style.background = color;
+    });
+
+    window.api.onSaveRequest(() => {
+      openSaveDialog();
     });
 
     function insertImage(file) {

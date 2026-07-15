@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -179,6 +179,86 @@ function stripHtml(html) {
   return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function htmlToMarkdown(html) {
+  return String(html || '')
+    .replace(/<img[^>]*src="([^"]+)"[^>]*alt="([^"]*)"[^>]*>/gi, '![$2]($1)')
+    .replace(/<(strong|b)>(.*?)<\/\1>/gi, '**$2**')
+    .replace(/<(em|i)>(.*?)<\/\1>/gi, '*$2*')
+    .replace(/<h1>(.*?)<\/h1>/gi, '# $1\n\n')
+    .replace(/<h2>(.*?)<\/h2>/gi, '## $1\n\n')
+    .replace(/<h3>(.*?)<\/h3>/gi, '### $1\n\n')
+    .replace(/<h4>(.*?)<\/h4>/gi, '#### $1\n\n')
+    .replace(/<h5>(.*?)<\/h5>/gi, '##### $1\n\n')
+    .replace(/<h6>(.*?)<\/h6>/gi, '###### $1\n\n')
+    .replace(/<li>(.*?)<\/li>/gi, '- $1\n')
+    .replace(/<\/(ul|ol)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>|<\/div>/gi, '\n\n')
+    .replace(/<p[^>]*class="todo done"[^>]*>.*?<span[^>]*class="check"[^>]*><\/span>(.*?)<\/p>/gi, '- [x] $1\n')
+    .replace(/<p[^>]*class="todo"[^>]*>.*?<span[^>]*class="check"[^>]*><\/span>(.*?)<\/p>/gi, '- [ ] $1\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function buildExportHtml(body, noteTitle) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${noteTitle}</title>
+</head>
+<body>
+${body}
+</body>
+</html>
+`;
+}
+
+async function saveNoteToFile(win, note = {}) {
+  if (!win || win.isDestroyed()) return { canceled: true };
+  const html = String(note.html || '');
+  const plainText = String(note.text || stripHtml(html));
+  const markdown = String(note.markdown || htmlToMarkdown(html));
+  const defaultName = `sticky-note-${win.noteId || Date.now()}`;
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Save Note',
+    defaultPath: defaultName,
+    filters: [
+      { name: 'HTML', extensions: ['html', 'htm'] },
+      { name: 'Plain Text', extensions: ['txt'] },
+      { name: 'Markdown', extensions: ['md'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+
+  if (canceled || !filePath) return { canceled: true };
+
+  const ext = path.extname(filePath).toLowerCase();
+  let content = plainText;
+  if (ext === '.html' || ext === '.htm') {
+    content = buildExportHtml(html, defaultName);
+  } else if (ext === '.md') {
+    content = markdown;
+  }
+
+  fs.writeFileSync(filePath, content, 'utf8');
+  return { canceled: false, filePath };
+}
+
+function requestSaveForFocusedWindow() {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (!focused || focused.isDestroyed()) return;
+  focused.webContents.send('note:perform-save');
+}
+
 function openSearch() {
   if (searchWin && !searchWin.isDestroyed()) {
     if (searchWin.isVisible()) {
@@ -241,6 +321,7 @@ function buildMenu() {
       label: 'File',
       submenu: [
         { label: 'New Note', accelerator: 'CmdOrCtrl+N', click: () => createNote() },
+        { label: 'Save As...', accelerator: 'CmdOrCtrl+S', click: requestSaveForFocusedWindow },
         {
           label: 'Close Note',
           accelerator: 'CmdOrCtrl+W',
@@ -387,6 +468,11 @@ ipcMain.on('note:update', (event, { id, text, color }) => {
 });
 
 ipcMain.on('note:new', () => createNote());
+
+ipcMain.handle('note:save-dialog', async (event, note) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  return saveNoteToFile(win, note);
+});
 
 ipcMain.on('note:delete', (event, id) => {
   const win = windows.get(id);
